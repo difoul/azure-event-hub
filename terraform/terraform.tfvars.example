@@ -1,0 +1,37 @@
+resource_group_name = "rg-event-hub-demo"
+location            = "swedencentral"
+container_app_name  = "event-hub-demo"
+alert_email         = "your-email@example.com"
+event_hub_capacity  = 1                   # increase if ThrottledRequests alert fires
+enable_law          = false               # set to true to deploy LAW + AMPLS for ContainerAppHTTPLogs (Envoy ingress logs)
+
+# Required: the app must listen on port 8000 and expose GET /health
+container_image = "docker.io/myorg/myapp:latest"
+
+# ── Cribl Stream configuration (after apply) ──────────────────────────────────
+# Run: terraform output eventhub_cribl_connection_string
+#
+# In Cribl Stream (on-premise):
+#   1. Go to Data → Sources → Azure Event Hubs → Add Source
+#   2. Set the following fields:
+#      Namespace       : <eventhub_namespace_fqdn output>  (e.g. evhns-event-hub-demo.servicebus.windows.net)
+#      Event Hub name  : <eventhub_name output>            (e.g. evh-container-app-logs)
+#      Consumer group  : cribl
+#      Auth method     : Connection String
+#      Connection string: <primary_connection_string from eventhub_cribl_connection_string output>
+#   3. Configure a Pipeline to parse the JSON records array:
+#      - Eval: _raw = JSON.parse(_raw).records
+#      - Unroll: records array into individual events
+#      - Set index/sourcetype fields as needed for your destination
+#   4. Connect the source to your desired destination (Splunk HEC, S3, Elastic, etc.)
+#
+# ── On-premise Cribl network access ───────────────────────────────────────────
+# Event Hub network_rulesets.default_action = "Deny" (public access disabled).
+# Cribl deployed as a Container App in this stack connects via the private endpoint
+# in snet-private-endpoints (same VNet — no extra config needed).
+# On-premise Cribl instances require ExpressRoute or VPN Gateway to reach the
+# private endpoint (IP: see eventhub_private_endpoint_ip output).
+#
+# Required outbound ports from the Cribl worker node to servicebus.windows.net:
+#   443       — AMQP over WebSockets (preferred if 5671/5672 are blocked by firewall)
+#   5671/5672 — native AMQP
