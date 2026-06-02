@@ -52,18 +52,28 @@ terraform apply -target=azurerm_container_registry.main
 
 ### 3. Build and push the app image
 
-No local Docker required — ACR Tasks builds the image in Azure:
+Run from the repo root (where `Dockerfile` lives).
+
+**Option A — ACR Tasks (no local Docker required):**
 
 ```bash
 az acr build \
   --registry $(terraform output -raw acr_login_server | cut -d. -f1) \
   --image my-app:latest \
-  /path/to/repo
+  .
 ```
 
-Run from the directory containing the `Dockerfile`. Azure streams the build logs back to your terminal.
+Azure builds the image in the cloud and pushes it to ACR automatically. Useful when Docker is not installed locally.
 
-> If deploying to a new environment without Docker CLI access, this is the only build method needed.
+**Option B — Local Docker:**
+
+```bash
+ACR=$(terraform output -raw acr_login_server)
+docker build -t my-app:latest .
+docker tag my-app:latest $ACR/my-app:latest
+az acr login --name $(echo $ACR | cut -d. -f1)
+docker push $ACR/my-app:latest
+```
 
 ### 4. Deploy the rest of the stack
 
