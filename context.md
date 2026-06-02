@@ -37,9 +37,10 @@ Log Analytics Workspace (optional, enable_law = true)
 - **Cribl instead of Splunk**: replaced Splunk Add-on consumer with Cribl Stream deployed as a Container App in the same VNet. Cribl is consumer-agnostic and can route to any destination.
 - **Single Event Hub**: all log categories from the environment flow into one hub (`evh-container-app-logs`). Cribl parses the `category` field to differentiate.
 - **Azure Files persistence**: Cribl config is persisted to an Azure Files share so configuration survives container restarts.
-- **No ACR**: both the demo app and Cribl use public Docker Hub images — no ACR resource or registry block needed.
-- **Event Hub network hardened**: `default_action = "Deny"` + `public_network_access_enabled = false`. Cribl reaches the hub via the private endpoint in the same VNet. Azure Monitor diagnostic settings bypass the firewall via `trusted_service_access_enabled = true`.
-- **Cribl storage network hardened**: `network_rules { default_action = "Deny", bypass = ["AzureServices"] }` — blocks public internet access while allowing the CAE volume mount path.
+- **ACR for the demo app**: `azurerm_container_registry` (Basic SKU, admin enabled) with `random_id` suffix. Image built via `az acr build` (no local Docker needed) or `docker build` + `docker push`. ACR credentials injected as a secret into the demo app Container App.
+- **Event Hub network hardened**: `default_action = "Deny"` + `public_network_access_enabled = false` must be set at BOTH the top-level namespace attribute AND inside the `network_rulesets` block — Azure rejects plans where they differ. Cribl reaches the hub via the private endpoint in the same VNet. Azure Monitor diagnostic settings bypass the firewall via `trusted_service_access_enabled = true`.
+- **DiagnosticsRule is Send-only** (`manage = false`): Azure Monitor only needs Send. Terraform reads connection strings via ARM management plane RBAC — not via the SAS Manage right. Setting `manage = true` without `listen = true` causes `InvalidCombinationOfRights`.
+- **Cribl storage network hardened**: `network_rules { default_action = "Deny", bypass = ["AzureServices"], virtual_network_subnet_ids = [snet-container-apps] }`. `bypass = ["AzureServices"]` alone does NOT cover CAE CIFS mounts — `service_endpoints = ["Microsoft.Storage"]` must also be set on the CAE subnet or mounts fail with error 13 (permission denied).
 
 ---
 
@@ -64,7 +65,7 @@ azure-event-hub/
     ├── providers.tf               # azurerm ~>4.67, random ~>3.0
     ├── variables.tf               # All vars: container_image (required), enable_law, cribl_image, event_hub_capacity, alert_email, etc.
     ├── network.tf                 # VNet, subnets, NSG (incl. EventHub outbound rule)
-    ├── acr.tf                     # Comment only — ACR removed (public images used)
+    ├── acr.tf                     # ACR (Basic SKU, admin enabled, random_id suffix)
     ├── container_app.tf           # Container App Environment + demo app Container App
     ├── container_app_cribl.tf     # Cribl Stream Container App + Azure Files persistence + admin password
     ├── eventhub.tf                # Event Hub namespace, hub, SAS policies, consumer group, private endpoint
@@ -96,7 +97,7 @@ azure-event-hub/
 ### Event Hub (`eventhub.tf`)
 - Namespace: `evhns-event-hub-demo`, Standard tier, auto-inflate up to 20 TU
 - Hub: `evh-container-app-logs`, 4 partitions, 7-day retention
-- SAS policies: `DiagnosticsRule` (Send+Manage, used by diagnostic settings), `CriblListenRule` (Listen only)
+- SAS policies: `DiagnosticsRule` (Send only, manage=false — Azure Monitor doesn't need Manage), `CriblListenRule` (Listen only)
 - Consumer group: `cribl`
 - Private endpoint in `snet-private-endpoints` with `privatelink.servicebus.windows.net` DNS zone
 - Network hardened: `default_action = "Deny"`, `public_network_access_enabled = false`, `trusted_service_access_enabled = true`
