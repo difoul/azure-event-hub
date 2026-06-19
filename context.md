@@ -155,8 +155,180 @@ azure-event-hub/
    - Event Hub name: `evh-container-app-logs`
    - Consumer group: `cribl`
    - Connection string: `<eventhub_cribl_connection_string>` (already in container as `AZURE_EVENTHUB_CONNECTION_STRING`)
-3. Add a Pipeline to unroll the `records[]` array Azure Monitor wraps all diagnostic logs in
+3. Add a Pipeline (see Cribl Pipeline section below)
 4. Route to your destination
+
+---
+
+## Cribl Pipeline — ContainerAppConsoleLogs
+
+Azure Monitor wraps all diagnostic logs in a `records[]` array. Each record's app log is a string in `properties.Log`. The Event Hub source delivers the full batch as one event under `_raw`.
+
+### Actual Event Hub payload structure
+
+```
+_raw (object)
+  └─ records[] (array of 100+ items)
+       └─ each record:
+            ├─ time, category, resourceId, operationName, location
+            ├─ Tenant, Level, ProviderGuid, ProviderName, EventId, Pid, Tid, ActivityId
+            └─ properties
+                 ├─ Log          ← the actual log line (string)
+                 ├─ ContainerName, ContainerAppName, RevisionName
+                 ├─ ContainerId, ContainerGroupName, ContainerGroupId
+                 ├─ EnvironmentName, Stream, ContainerImage
+```
+
+### Log types in `properties.Log`
+
+| Type | Content | Action |
+|---|---|---|
+| App access log | Complete JSON: `{"asctime": ..., "name": "access", ...}` | **Keep + parse** |
+| OTel span fragment | Partial JSON line: `"    \"status\": {"` | **Drop** (~120/batch) |
+| Uvicorn access log | Plain text: `INFO:     127.0.0.1 - "GET /health..."` | **Drop** (redundant) |
+
+> The `ConsoleSpanExporter` in `app/main.py` pretty-prints each OTel span as multi-line JSON — every line becomes a separate Event Hub record (~120 per request). This is the dominant source of Event Hub volume. Remove or replace with OTLP exporter to reduce volume by ~98%.
+
+### Pipeline steps
+
+**Step 1 — Unroll**
+- Source field expression: `_raw.records`
+- Destination field: `record`
+
+**Step 2 — Eval** (promote fields + set timestamp)
+- `Log = record.properties.Log`
+- `container = record.properties.ContainerName`
+- `app = record.properties.ContainerAppName`
+- `revision = record.properties.RevisionName`
+- `_time = new Date(record.time).getTime() / 1000`
+- `record = undefined`, `records = undefined`
+
+**Step 3 — Drop** (discard OTel fragments + uvicorn lines)
+- Field: `Log`
+- Regex: `^(?!\{"asctime")` — drops everything where Log does NOT start with `{"asctime"`
+
+**Step 4 — Parser (JSON)**
+- Source field: `Log`
+
+**Step 5 — Eval** (enrich + clean up)
+- `severity = levelname`
+- `logger = name`
+- `log_type = name === 'access' ? 'http_access' : 'app'`
+- `is_error = status_code >= 400`
+- `is_slow = duration_ms > 1000`
+- `query = query === '' ? undefined : query`
+- Remove: `levelname`, `name`, `asctime`, `Log`, `Tenant`, `Level`, `ProviderGuid`, `ProviderName`, `EventId`, `Pid`, `Tid`, `ActivityId`, `time`, `resourceId`, `operationName`, `category`, `location`, `properties`
+
+**Step 6 — Drop** (suppress health check noise)
+- Field: `log_type` (or use path field)
+- Filter: drop events where `path === '/health' && status_code === 200`
+
+### Output event shape (access log)
+
+```json
+{
+  "_time": 1748970149,
+  "message": "http_request",
+  "severity": "INFO",
+  "logger": "access",
+  "log_type": "http_access",
+  "method": "GET",
+  "path": "/health",
+  "status_code": 200,
+  "duration_ms": 0.43,
+  "trace_id": "...",
+  "span_id": "...",
+  "user_agent": "curl/8.11.1",
+  "is_error": false,
+  "is_slow": false,
+  "container": "event-hub-demo",
+  "app": "event-hub-demo",
+  "revision": "event-hub-demo--eaotb4o"
+}
+```
+
+---
+
+## Cribl Pipeline — AllMetrics
+
+Azure Monitor metrics arrive in the same `records[]` array as logs but with a flat structure — no `properties`, no `Tenant`, no `category` fields.
+
+### Actual metrics record structure
+
+```
+_raw (object)
+  └─ records[] (array)
+       └─ each record:
+            ├─ time, resourceId
+            ├─ metricName, timeGrain
+            └─ average, minimum, maximum, total, count
+```
+
+### Available metrics
+
+| `metricName` | Unit | Description |
+|---|---|---|
+| `CpuPercentage` | % | Container CPU usage |
+| `UsageNanoCores` | nanocores | Raw CPU — divide by 1e9 for cores |
+| `MemoryPercentage` | % | Container memory usage |
+| `WorkingSetBytes` | bytes | Raw memory — divide by 1048576 for MB |
+| `Replicas` | count | Running replicas |
+| `RestartCount` | count | Container restarts |
+| `RxBytes` / `TxBytes` | bytes | Network in/out |
+| `CoresQuotaUsed` | cores | Per-revision quota consumption |
+| `TotalCoresQuotaUsed` | cores | Total environment quota |
+| `ResiliencyRequestsPendingConnectionPool` | count | Connection pool queue depth |
+
+### Pipeline steps
+
+**Step 1 — Unroll**
+- Source field expression: `_raw.records`
+- Destination field: `record`
+
+**Step 2 — Eval** (promote fields + set timestamp)
+- `metric_name = record.metricName`
+- `average = record.average`
+- `minimum = record.minimum`
+- `maximum = record.maximum`
+- `total = record.total`
+- `count = record.count`
+- `time_grain = record.timeGrain`
+- `app = record.resourceId.split('/').pop().toLowerCase()`
+- `_time = new Date(record.time).getTime() / 1000`
+- `record = undefined`, `records = undefined`
+
+**Step 3 — Drop** (discard log records, keep only metrics)
+- Field: `metric_name`
+- Regex: `^(?!\w)` — drops events where `metric_name` is empty/undefined (log records)
+
+**Step 4 — Eval** (derived fields)
+- `cpu_cores = metric_name === 'UsageNanoCores' ? Math.round(average / 1e9 * 1000) / 1000 : undefined`
+- `memory_mb = metric_name === 'WorkingSetBytes' ? Math.round(average / 1048576 * 100) / 100 : undefined`
+- `event_type = 'metric'`
+
+### Output event shape
+
+```json
+{
+  "_time": 1748977380,
+  "event_type": "metric",
+  "metric_name": "UsageNanoCores",
+  "average": 1740492.5,
+  "minimum": 1693860,
+  "maximum": 1855562,
+  "total": 6961970,
+  "count": 4,
+  "time_grain": "PT1M",
+  "app": "event-hub-demo",
+  "cpu_cores": 0.002
+}
+```
+
+---
+
+## ContainerAppSystemLogs (container restarts, OOM, scaling)
+
+Not yet built. Check if `ContainerAppSystemLogs` events are present in Event Hub by inspecting the `category` field. If present, a second pipeline branch or separate pipeline is needed.
 
 ---
 

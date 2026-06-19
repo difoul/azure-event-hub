@@ -1,0 +1,130 @@
+{
+  "properties": {
+    "displayName": "Deploy AllMetrics diagnostic settings to Event Hub",
+    "policyType": "Custom",
+    "mode": "All",
+    "description": "DeployIfNotExists: streams AllMetrics from supported resource types to the central Event Hub for Cribl.",
+    "metadata": {
+      "category": "Monitoring"
+    },
+    "parameters": {
+      "effect": {
+        "type": "String",
+        "allowedValues": [
+          "DeployIfNotExists",
+          "AuditIfNotExists",
+          "Disabled"
+        ],
+        "defaultValue": "DeployIfNotExists",
+        "metadata": {
+          "displayName": "Effect",
+          "description": "Enable or disable execution of the policy."
+        }
+      },
+      "diagnosticSettingName": {
+        "type": "String",
+        "defaultValue": "setByPolicy-Metrics-EventHub",
+        "metadata": {
+          "displayName": "Diagnostic setting name"
+        }
+      },
+      "eventHubAuthorizationRuleId": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Event Hub authorization rule ID",
+          "strongType": "Microsoft.EventHub/namespaces/authorizationRules",
+          "assignPermission": true
+        }
+      },
+      "eventHubName": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Event Hub name"
+        }
+      },
+      "resourceTypeList": {
+        "type": "Array",
+        "metadata": {
+          "displayName": "Resource types to target",
+          "description": "Resource types evaluated for the AllMetrics diagnostic setting."
+        }
+      }
+    },
+    "policyRule": {
+      "if": {
+        "field": "type",
+        "in": "[parameters('resourceTypeList')]"
+      },
+      "then": {
+        "effect": "[parameters('effect')]",
+        "details": {
+          "type": "Microsoft.Insights/diagnosticSettings",
+          "name": "[parameters('diagnosticSettingName')]",
+          "roleDefinitionIds": [
+            "/providers/Microsoft.Authorization/roleDefinitions/92aaf0da-9dab-42b6-94a3-d43ce8d16293",
+            "/providers/Microsoft.Authorization/roleDefinitions/f526a384-b230-433a-b45c-95f59c4a2dec"
+          ],
+          "existenceCondition": {
+            "field": "Microsoft.Insights/diagnosticSettings/eventHubAuthorizationRuleId",
+            "equals": "[parameters('eventHubAuthorizationRuleId')]"
+          },
+          "deployment": {
+            "properties": {
+              "mode": "incremental",
+              "template": {
+                "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                "contentVersion": "1.0.0.0",
+                "parameters": {
+                  "resourceScope": {
+                    "type": "string"
+                  },
+                  "diagnosticSettingName": {
+                    "type": "string"
+                  },
+                  "eventHubAuthorizationRuleId": {
+                    "type": "string"
+                  },
+                  "eventHubName": {
+                    "type": "string"
+                  }
+                },
+                "resources": [
+                  {
+                    "type": "Microsoft.Insights/diagnosticSettings",
+                    "apiVersion": "2021-05-01-preview",
+                    "name": "[parameters('diagnosticSettingName')]",
+                    "scope": "[parameters('resourceScope')]",
+                    "properties": {
+                      "eventHubAuthorizationRuleId": "[parameters('eventHubAuthorizationRuleId')]",
+                      "eventHubName": "[parameters('eventHubName')]",
+                      "metrics": [
+                        {
+                          "category": "AllMetrics",
+                          "enabled": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              "parameters": {
+                "resourceScope": {
+                  "value": "[concat(field('type'), '/', field('fullName'))]"
+                },
+                "diagnosticSettingName": {
+                  "value": "[parameters('diagnosticSettingName')]"
+                },
+                "eventHubAuthorizationRuleId": {
+                  "value": "[parameters('eventHubAuthorizationRuleId')]"
+                },
+                "eventHubName": {
+                  "value": "[parameters('eventHubName')]"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

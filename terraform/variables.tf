@@ -59,3 +59,56 @@ variable "event_hub_capacity" {
     error_message = "event_hub_capacity must be between 1 and 20."
   }
 }
+
+# ── Diagnostic-settings-at-scale policy (policy_diagnostics.tf) ────────────────
+
+variable "diagnostics_policy_management_group_id" {
+  description = "Full resource ID of the management group to assign the 'Enable allLogs to Event Hub' initiative to, e.g. '/providers/Microsoft.Management/managementGroups/<mg-name>'. Leave null to skip the assignment entirely."
+  type        = string
+  default     = null
+}
+
+variable "diagnostics_policy_event_hub_auth_rule_id" {
+  description = "Namespace-level Event Hub authorization rule ID (Send right) the policy writes into each diagnostic setting. Defaults to this project's DiagnosticsRule when null."
+  type        = string
+  default     = null
+}
+
+variable "diagnostics_policy_event_hub_name" {
+  description = "Target Event Hub instance name for policy-deployed diagnostic settings. Defaults to this project's hub when null."
+  type        = string
+  default     = null
+}
+
+variable "diagnostics_policy_resource_location" {
+  description = "Azure region the Event Hub initiative targets. The Event Hub destination only supports a single region, so only resources in this region get diagnostic settings. Must match the Event Hub namespace region. Defaults to var.location when null."
+  type        = string
+  default     = null
+}
+
+variable "diagnostics_metrics_resource_types" {
+  description = "Resource types the metrics-to-Event-Hub DeployIfNotExists policy targets (policy_metrics.tf). Defaults to common metric-emitting types. Keep this to types that support the AllMetrics category — listing a type that has no metrics produces failed remediations. Extend or trim to match your estate."
+  type        = list(string)
+  default = [
+    "Microsoft.App/managedEnvironments",
+    "Microsoft.KeyVault/vaults",
+    "Microsoft.Storage/storageAccounts",
+    "Microsoft.Sql/servers/databases",
+    "Microsoft.ContainerService/managedClusters",
+    "Microsoft.Cache/Redis",
+    "Microsoft.EventHub/namespaces",
+    "Microsoft.ServiceBus/namespaces",
+    "Microsoft.Network/applicationGateways",
+    "Microsoft.Network/loadBalancers",
+    "Microsoft.Network/publicIPAddresses",
+    "Microsoft.Compute/virtualMachines",
+    "Microsoft.Compute/virtualMachineScaleSets",
+    "Microsoft.Web/sites",
+    "Microsoft.DocumentDB/databaseAccounts",
+    "Microsoft.DBforPostgreSQL/flexibleServers",
+    "Microsoft.DBforMySQL/flexibleServers",
+    "Microsoft.ApiManagement/service",
+    "Microsoft.CognitiveServices/accounts",
+    "Microsoft.SignalRService/SignalR",
+  ]
+}

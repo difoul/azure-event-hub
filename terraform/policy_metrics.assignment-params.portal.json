@@ -1,0 +1,38 @@
+{
+  "effect": {
+    "value": "DeployIfNotExists"
+  },
+  "diagnosticSettingName": {
+    "value": "setByPolicy-Metrics-EventHub"
+  },
+  "eventHubAuthorizationRuleId": {
+    "value": "<REPLACE: /subscriptions/.../resourceGroups/.../providers/Microsoft.EventHub/namespaces/<ns>/authorizationRules/<rule>>"
+  },
+  "eventHubName": {
+    "value": "<REPLACE: your event hub name>"
+  },
+  "resourceTypeList": {
+    "value": [
+      "Microsoft.App/managedEnvironments",
+      "Microsoft.KeyVault/vaults",
+      "Microsoft.Storage/storageAccounts",
+      "Microsoft.Sql/servers/databases",
+      "Microsoft.ContainerService/managedClusters",
+      "Microsoft.Cache/Redis",
+      "Microsoft.EventHub/namespaces",
+      "Microsoft.ServiceBus/namespaces",
+      "Microsoft.Network/applicationGateways",
+      "Microsoft.Network/loadBalancers",
+      "Microsoft.Network/publicIPAddresses",
+      "Microsoft.Compute/virtualMachines",
+      "Microsoft.Compute/virtualMachineScaleSets",
+      "Microsoft.Web/sites",
+      "Microsoft.DocumentDB/databaseAccounts",
+      "Microsoft.DBforPostgreSQL/flexibleServers",
+      "Microsoft.DBforMySQL/flexibleServers",
+      "Microsoft.ApiManagement/service",
+      "Microsoft.CognitiveServices/accounts",
+      "Microsoft.SignalRService/SignalR"
+    ]
+  }
+}
