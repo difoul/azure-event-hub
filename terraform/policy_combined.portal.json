@@ -1,9 +1,9 @@
 {
   "properties": {
-    "displayName": "Deploy AllMetrics diagnostic settings to Event Hub",
+    "displayName": "Deploy allLogs + AllMetrics diagnostic setting to Event Hub",
     "policyType": "Custom",
     "mode": "All",
-    "description": "DeployIfNotExists: streams AllMetrics from supported resource types to the central Event Hub for Cribl.",
+    "description": "DeployIfNotExists: streams allLogs and AllMetrics from supported resource types to the central Event Hub for Cribl, in a single diagnostic setting.",
     "metadata": {
       "category": "Monitoring"
     },
@@ -23,7 +23,7 @@
       },
       "diagnosticSettingName": {
         "type": "String",
-        "defaultValue": "setByPolicy-Metrics-EventHub",
+        "defaultValue": "setByPolicy-LogsMetrics-EventHub",
         "metadata": {
           "displayName": "Diagnostic setting name"
         }
@@ -46,7 +46,7 @@
         "type": "Array",
         "metadata": {
           "displayName": "Resource types to target",
-          "description": "Resource types evaluated for the AllMetrics diagnostic setting."
+          "description": "Resource types evaluated for the combined logs+metrics diagnostic setting. Must be metric-emitting types - AllMetrics fails on types without metrics."
         }
       }
     },
@@ -97,6 +97,12 @@
                     "properties": {
                       "eventHubAuthorizationRuleId": "[parameters('eventHubAuthorizationRuleId')]",
                       "eventHubName": "[parameters('eventHubName')]",
+                      "logs": [
+                        {
+                          "categoryGroup": "allLogs",
+                          "enabled": true
+                        }
+                      ],
                       "metrics": [
                         {
                           "category": "AllMetrics",

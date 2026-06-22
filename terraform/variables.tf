@@ -86,6 +86,12 @@ variable "diagnostics_policy_resource_location" {
   default     = null
 }
 
+variable "diagnostics_combined_policy_enabled" {
+  description = "Opt in to the SINGLE-SETTING alternative (policy_combined.tf): one custom DeployIfNotExists policy that writes allLogs + AllMetrics into ONE diagnostic setting per resource, instead of the two separate settings produced by the built-in logs initiative + the metrics policy. When true, do NOT also assign those two to the same scope or resources get duplicate settings. Targets var.diagnostics_metrics_resource_types. Requires diagnostics_policy_management_group_id to be set."
+  type        = bool
+  default     = false
+}
+
 variable "diagnostics_metrics_resource_types" {
   description = "Resource types the metrics-to-Event-Hub DeployIfNotExists policy targets (policy_metrics.tf). Defaults to common metric-emitting types. Keep this to types that support the AllMetrics category — listing a type that has no metrics produces failed remediations. Extend or trim to match your estate."
   type        = list(string)

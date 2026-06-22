@@ -1,37 +1,44 @@
-# ── Metrics at scale via a single generic DeployIfNotExists policy ────────────
+# ── Logs + Metrics in ONE diagnostic setting (single-setting alternative) ─────
 #
-# Companion to policy_diagnostics.tf (which handles LOGS via the built-in
-# allLogs initiative). The built-in initiatives don't configure platform
-# metrics, and DCR metrics export covers only ~10 resource types — so to get
-# ONE solution spanning every resource type, this defines a single custom DINE
-# policy that deploys an AllMetrics diagnostic setting to the Event Hub.
+# ALTERNATIVE to running policy_diagnostics.tf (built-in allLogs initiative) +
+# policy_metrics.tf (custom AllMetrics policy) side by side. Those two write TWO
+# diagnostic settings per resource, consuming 2 of Azure's 5-setting cap. This
+# file collapses both into a SINGLE custom DeployIfNotExists policy that writes
+# ONE diagnostic setting carrying both `logs: [allLogs]` and `metrics: [AllMetrics]`.
 #
-# Why one policy works for all types: Microsoft.Insights/diagnosticSettings is
-# an extension resource, so the embedded deployment targets the resource via
-# `scope` ([field('id')]) instead of hardcoding the parent type. The `if`
-# matches a parameterized resource-type list (var.diagnostics_metrics_resource_types)
-# so only metric-emitting types are touched — listing a type without AllMetrics
-# would otherwise produce failed remediations.
+# Disabled by default and gated on its own toggle so it never double-deploys
+# alongside the other two. To test: set diagnostics_combined_policy_enabled=true
+# AND ensure the other two assignments are NOT also applied to the same scope
+# (otherwise resources get duplicate settings → defeats the purpose / hits the cap).
 #
-# Caveats (inherent to the diagnostic-settings route):
-#   * Metric DIMENSIONS are dropped on export. Use DCR metrics export per-type
-#     if you need dimensions (supports ~10 types only).
-#   * Single region: the resource and Event Hub must share a region
-#     (local.diag_resource_location), same constraint as the logs initiative.
-#   * New/updated resources only — no remediation task, matching the logs setup.
-#   * Writes a distinct diagnostic setting (setByPolicy-Metrics-EventHub) so it
-#     coexists with the logs setting; Azure allows up to 5 per resource.
+# ── The trade-off the team needs to weigh ────────────────────────────────────
+#   * SCOPE IS THE METRIC-EMITTING TYPE LIST. AllMetrics fails remediation on
+#     types that emit no metrics, so the `if` can only target metric-emitting
+#     types (var.diagnostics_metrics_resource_types). Log-only resource types
+#     (in MG but not in that list) get NOTHING from this policy — they would
+#     still need the built-in logs initiative. So this is "one setting per
+#     metric-emitting resource", not "one policy for the entire estate".
+#   * allLogs is a category GROUP, generic across types — a metric-emitting type
+#     with no log categories simply exports no logs (the setting still applies).
+#   * You give up the Microsoft-MAINTAINED built-in logs initiative and own the
+#     logs half here too.
+#   * Same single-region constraint and new/updated-only behaviour (no
+#     remediation task) as the other two.
 #
-# Gated on the same var.diagnostics_policy_management_group_id and reuses the
-# locals (diag_policy_enabled, diag_eh_auth_rule_id, diag_eh_name,
-# diag_resource_location) defined in policy_diagnostics.tf.
+# Reuses the locals from policy_diagnostics.tf (diag_policy_enabled,
+# diag_eh_auth_rule_id, diag_eh_name, diag_resource_location) and the same
+# var.diagnostics_metrics_resource_types as policy_metrics.tf.
 
-resource "azurerm_policy_definition" "metrics_to_eventhub" {
-  count = local.diag_policy_enabled ? 1 : 0
+locals {
+  diag_combined_enabled = local.diag_policy_enabled && var.diagnostics_combined_policy_enabled
+}
 
-  name                = "deploy-metrics-to-eventhub"
-  display_name        = "Deploy AllMetrics diagnostic settings to Event Hub"
-  description         = "DeployIfNotExists: streams AllMetrics from supported resource types to the central Event Hub for Cribl."
+resource "azurerm_policy_definition" "logs_metrics_to_eventhub" {
+  count = local.diag_combined_enabled ? 1 : 0
+
+  name                = "deploy-logs-metrics-to-eventhub"
+  display_name        = "Deploy allLogs + AllMetrics diagnostic setting to Event Hub"
+  description         = "DeployIfNotExists: streams allLogs and AllMetrics from supported resource types to the central Event Hub for Cribl, in a single diagnostic setting."
   policy_type         = "Custom"
   mode                = "All"
   management_group_id = var.diagnostics_policy_management_group_id
@@ -52,7 +59,7 @@ resource "azurerm_policy_definition" "metrics_to_eventhub" {
     }
     diagnosticSettingName = {
       type         = "String"
-      defaultValue = "setByPolicy-Metrics-EventHub"
+      defaultValue = "setByPolicy-LogsMetrics-EventHub"
       metadata = {
         displayName = "Diagnostic setting name"
       }
@@ -75,7 +82,7 @@ resource "azurerm_policy_definition" "metrics_to_eventhub" {
       type = "Array"
       metadata = {
         displayName = "Resource types to target"
-        description = "Resource types evaluated for the AllMetrics diagnostic setting."
+        description = "Resource types evaluated for the combined logs+metrics diagnostic setting. Must be metric-emitting types — AllMetrics fails on types without metrics."
       }
     }
   })
@@ -92,8 +99,8 @@ resource "azurerm_policy_definition" "metrics_to_eventhub" {
         name = "[parameters('diagnosticSettingName')]"
         roleDefinitionIds = [
           # Log Analytics Contributor (diagnosticSettings/write) + Azure Event
-          # Hubs Data Owner (data-plane write to the hub) — the same pair the
-          # built-in EH diagnostic policies declare.
+          # Hubs Data Owner (data-plane write to the hub) — same pair as the
+          # logs and metrics policies.
           "/providers/Microsoft.Authorization/roleDefinitions/92aaf0da-9dab-42b6-94a3-d43ce8d16293",
           "/providers/Microsoft.Authorization/roleDefinitions/f526a384-b230-433a-b45c-95f59c4a2dec",
         ]
@@ -108,10 +115,8 @@ resource "azurerm_policy_definition" "metrics_to_eventhub" {
               "$schema"      = "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#"
               contentVersion = "1.0.0.0"
               parameters = {
-                # Relative scope of the evaluated resource (<type>/<fullName>),
-                # e.g. "Microsoft.KeyVault/vaults/myvault". This is how an
-                # extension resource attaches generically without hardcoding the
-                # parent type — a full resource ID is NOT valid for `scope`.
+                # Relative scope (<type>/<fullName>) — how an extension resource
+                # attaches generically without hardcoding the parent type.
                 resourceScope               = { type = "string" }
                 diagnosticSettingName       = { type = "string" }
                 eventHubAuthorizationRuleId = { type = "string" }
@@ -126,6 +131,14 @@ resource "azurerm_policy_definition" "metrics_to_eventhub" {
                   properties = {
                     eventHubAuthorizationRuleId = "[parameters('eventHubAuthorizationRuleId')]"
                     eventHubName                = "[parameters('eventHubName')]"
+                    # Both halves in ONE setting. allLogs is a generic category
+                    # group; AllMetrics is the generic metrics category.
+                    logs = [
+                      {
+                        categoryGroup = "allLogs"
+                        enabled       = true
+                      }
+                    ]
                     metrics = [
                       {
                         category = "AllMetrics"
@@ -149,14 +162,14 @@ resource "azurerm_policy_definition" "metrics_to_eventhub" {
   })
 }
 
-resource "azurerm_management_group_policy_assignment" "metrics_to_eventhub" {
-  count = local.diag_policy_enabled ? 1 : 0
+resource "azurerm_management_group_policy_assignment" "logs_metrics_to_eventhub" {
+  count = local.diag_combined_enabled ? 1 : 0
 
-  name                 = "diag-metrics-to-evh"
-  display_name         = "Deploy AllMetrics to Event Hub"
-  description          = "Streams AllMetrics from supported resource types to the Event Hub for Cribl. Applies to new/updated resources in ${local.diag_resource_location}."
+  name                 = "diag-logs-metrics-to-evh"
+  display_name         = "Deploy allLogs + AllMetrics to Event Hub"
+  description          = "Streams allLogs and AllMetrics from supported resource types to the Event Hub for Cribl in a single diagnostic setting. Applies to new/updated resources in ${local.diag_resource_location}."
   management_group_id  = var.diagnostics_policy_management_group_id
-  policy_definition_id = azurerm_policy_definition.metrics_to_eventhub[0].id
+  policy_definition_id = azurerm_policy_definition.logs_metrics_to_eventhub[0].id
   location             = local.diag_resource_location
 
   identity {
@@ -170,16 +183,16 @@ resource "azurerm_management_group_policy_assignment" "metrics_to_eventhub" {
   })
 }
 
-# The policy identity needs the same roles declared in the policy's
-# roleDefinitionIds: Log Analytics Contributor (write diagnostic settings) +
-# Azure Event Hubs Data Owner (data-plane write to the hub). Granted at MG scope.
-resource "azurerm_role_assignment" "metrics_policy" {
-  for_each = local.diag_policy_enabled ? toset([
+# Policy identity needs the roles declared in roleDefinitionIds: Log Analytics
+# Contributor (write diagnostic settings) + Azure Event Hubs Data Owner
+# (data-plane write to the hub). Granted at MG scope.
+resource "azurerm_role_assignment" "combined_policy" {
+  for_each = local.diag_combined_enabled ? toset([
     "Log Analytics Contributor",
     "Azure Event Hubs Data Owner",
   ]) : toset([])
 
   scope                = var.diagnostics_policy_management_group_id
   role_definition_name = each.value
-  principal_id         = azurerm_management_group_policy_assignment.metrics_to_eventhub[0].identity[0].principal_id
+  principal_id         = azurerm_management_group_policy_assignment.logs_metrics_to_eventhub[0].identity[0].principal_id
 }
