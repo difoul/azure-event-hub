@@ -1,0 +1,163 @@
+{
+  "properties": {
+    "displayName": "Deploy allLogs + AllMetrics diagnostic setting to Event Hub (tag-routed)",
+    "policyType": "Custom",
+    "mode": "All",
+    "description": "DeployIfNotExists: streams allLogs and AllMetrics from supported resource types into a single diagnostic setting, routed to the prod or non-prod Event Hub by the subscription's environment tag.",
+    "metadata": {
+      "category": "Monitoring"
+    },
+    "parameters": {
+      "effect": {
+        "type": "String",
+        "allowedValues": [
+          "DeployIfNotExists",
+          "AuditIfNotExists",
+          "Disabled"
+        ],
+        "defaultValue": "DeployIfNotExists",
+        "metadata": {
+          "displayName": "Effect",
+          "description": "Enable or disable execution of the policy."
+        }
+      },
+      "diagnosticSettingName": {
+        "type": "String",
+        "defaultValue": "setByPolicy-LogsMetrics-EventHub",
+        "metadata": {
+          "displayName": "Diagnostic setting name"
+        }
+      },
+      "environmentTagName": {
+        "type": "String",
+        "defaultValue": "environment",
+        "metadata": {
+          "displayName": "Subscription tag holding the environment",
+          "description": "Tag on the resource's SUBSCRIPTION whose value selects the Event Hub."
+        }
+      },
+      "prodTagValues": {
+        "type": "Array",
+        "metadata": {
+          "displayName": "Tag values routed to the prod Event Hub",
+          "description": "Lowercase environment tag values treated as production. All other values, and subscriptions missing the tag, route to the non-prod hub."
+        }
+      },
+      "prodEventHubAuthorizationRuleId": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Prod Event Hub authorization rule ID",
+          "strongType": "Microsoft.EventHub/Namespaces/AuthorizationRules"
+        }
+      },
+      "prodEventHubName": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Prod Event Hub name"
+        }
+      },
+      "nonprodEventHubAuthorizationRuleId": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Non-prod Event Hub authorization rule ID",
+          "strongType": "Microsoft.EventHub/Namespaces/AuthorizationRules"
+        }
+      },
+      "nonprodEventHubName": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Non-prod Event Hub name"
+        }
+      },
+      "resourceTypeList": {
+        "type": "Array",
+        "metadata": {
+          "displayName": "Resource types to target",
+          "description": "Resource types evaluated for the combined logs+metrics diagnostic setting. Must be metric-emitting types - AllMetrics fails on types without metrics."
+        }
+      }
+    },
+    "policyRule": {
+      "if": {
+        "field": "type",
+        "in": "[parameters('resourceTypeList')]"
+      },
+      "then": {
+        "effect": "[parameters('effect')]",
+        "details": {
+          "type": "Microsoft.Insights/diagnosticSettings",
+          "name": "[parameters('diagnosticSettingName')]",
+          "roleDefinitionIds": [
+            "/providers/Microsoft.Authorization/roleDefinitions/92aaf0da-9dab-42b6-94a3-d43ce8d16293",
+            "/providers/Microsoft.Authorization/roleDefinitions/f526a384-b230-433a-b45c-95f59c4a2dec"
+          ],
+          "existenceCondition": {
+            "field": "Microsoft.Insights/diagnosticSettings/eventHubAuthorizationRuleId",
+            "equals": "[if(contains(parameters('prodTagValues'), toLower(coalesce(tryGet(subscription().tags, parameters('environmentTagName')), '__untagged__'))), parameters('prodEventHubAuthorizationRuleId'), parameters('nonprodEventHubAuthorizationRuleId'))]"
+          },
+          "deployment": {
+            "properties": {
+              "mode": "incremental",
+              "template": {
+                "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                "contentVersion": "1.0.0.0",
+                "parameters": {
+                  "resourceScope": {
+                    "type": "string"
+                  },
+                  "diagnosticSettingName": {
+                    "type": "string"
+                  },
+                  "eventHubAuthorizationRuleId": {
+                    "type": "string"
+                  },
+                  "eventHubName": {
+                    "type": "string"
+                  }
+                },
+                "resources": [
+                  {
+                    "type": "Microsoft.Insights/diagnosticSettings",
+                    "apiVersion": "2021-05-01-preview",
+                    "name": "[parameters('diagnosticSettingName')]",
+                    "scope": "[parameters('resourceScope')]",
+                    "properties": {
+                      "eventHubAuthorizationRuleId": "[parameters('eventHubAuthorizationRuleId')]",
+                      "eventHubName": "[parameters('eventHubName')]",
+                      "logs": [
+                        {
+                          "categoryGroup": "allLogs",
+                          "enabled": true
+                        }
+                      ],
+                      "metrics": [
+                        {
+                          "category": "AllMetrics",
+                          "enabled": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              "parameters": {
+                "resourceScope": {
+                  "value": "[concat(field('type'), '/', field('fullName'))]"
+                },
+                "diagnosticSettingName": {
+                  "value": "[parameters('diagnosticSettingName')]"
+                },
+                "eventHubAuthorizationRuleId": {
+                  "value": "[if(contains(parameters('prodTagValues'), toLower(coalesce(tryGet(subscription().tags, parameters('environmentTagName')), '__untagged__'))), parameters('prodEventHubAuthorizationRuleId'), parameters('nonprodEventHubAuthorizationRuleId'))]"
+                },
+                "eventHubName": {
+                  "value": "[if(contains(parameters('prodTagValues'), toLower(coalesce(tryGet(subscription().tags, parameters('environmentTagName')), '__untagged__'))), parameters('prodEventHubName'), parameters('nonprodEventHubName'))]"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

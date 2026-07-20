@@ -30,7 +30,13 @@
 # var.diagnostics_metrics_resource_types as policy_metrics.tf.
 
 locals {
-  diag_combined_enabled = local.diag_policy_enabled && var.diagnostics_combined_policy_enabled
+  # Yields to the tag-routed variant (policy_combined_tagrouted.tf) when that
+  # one is enabled, so exactly one of the two deploys.
+  diag_combined_enabled = (
+    local.diag_policy_enabled
+    && var.diagnostics_combined_policy_enabled
+    && !var.diagnostics_eventhub_tag_routing
+  )
 }
 
 resource "azurerm_policy_definition" "logs_metrics_to_eventhub" {

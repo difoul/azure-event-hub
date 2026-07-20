@@ -92,6 +92,41 @@ variable "diagnostics_combined_policy_enabled" {
   default     = false
 }
 
+variable "diagnostics_eventhub_tag_routing" {
+  description = "Opt in to the TAG-ROUTED variant of the combined policy (policy_combined_tagrouted.tf): one MG assignment that routes each resource's diagnostic setting to the prod or non-prod Event Hub based on the resource's SUBSCRIPTION environment tag, instead of one hub per assignment. Replaces the single-hub combined policy when true (policy_combined.tf gates itself off). Requires diagnostics_combined_policy_enabled = true and diagnostics_prod_eventhub_auth_rule_id; the non-prod hub reuses diagnostics_policy_event_hub_auth_rule_id / this project's hub."
+  type        = bool
+  default     = false
+}
+
+variable "diagnostics_environment_tag_name" {
+  description = "Name of the subscription tag whose value selects the Event Hub in tag-routing mode."
+  type        = string
+  default     = "environment"
+}
+
+variable "diagnostics_prod_tag_values" {
+  description = "Subscription environment-tag values routed to the PROD Event Hub. Must be lowercase — the policy lowercases the tag value before comparing. Any other value, and subscriptions missing the tag, route to the non-prod hub (safe default)."
+  type        = list(string)
+  default     = ["pprod", "prod"]
+
+  validation {
+    condition     = alltrue([for v in var.diagnostics_prod_tag_values : v == lower(v)])
+    error_message = "diagnostics_prod_tag_values must be lowercase; the policy compares against a lowercased tag value."
+  }
+}
+
+variable "diagnostics_prod_eventhub_auth_rule_id" {
+  description = "Namespace-level authorization rule ID (Send right) on the PROD Event Hub namespace, used by the tag-routed combined policy. Required when diagnostics_eventhub_tag_routing = true."
+  type        = string
+  default     = null
+}
+
+variable "diagnostics_prod_eventhub_name" {
+  description = "Event Hub instance name inside the prod namespace for tag-routed diagnostic settings. Defaults to the same hub name as the non-prod side when null."
+  type        = string
+  default     = null
+}
+
 variable "diagnostics_metrics_resource_types" {
   description = "Resource types the metrics-to-Event-Hub DeployIfNotExists policy targets (policy_metrics.tf). Defaults to common metric-emitting types. Keep this to types that support the AllMetrics category — listing a type that has no metrics produces failed remediations. Extend or trim to match your estate."
   type        = list(string)

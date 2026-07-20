@@ -1,0 +1,53 @@
+{
+  "effect": {
+    "value": "DeployIfNotExists"
+  },
+  "diagnosticSettingName": {
+    "value": "setByPolicy-LogsMetrics-EventHub"
+  },
+  "environmentTagName": {
+    "value": "environment"
+  },
+  "prodTagValues": {
+    "value": [
+      "pprod",
+      "prod"
+    ]
+  },
+  "prodEventHubAuthorizationRuleId": {
+    "value": "<REPLACE: /subscriptions/.../resourceGroups/.../providers/Microsoft.EventHub/namespaces/<prod-ns>/authorizationRules/<rule>>"
+  },
+  "prodEventHubName": {
+    "value": "<REPLACE: prod event hub name>"
+  },
+  "nonprodEventHubAuthorizationRuleId": {
+    "value": "<REPLACE: /subscriptions/.../resourceGroups/.../providers/Microsoft.EventHub/namespaces/<nonprod-ns>/authorizationRules/<rule>>"
+  },
+  "nonprodEventHubName": {
+    "value": "<REPLACE: non-prod event hub name>"
+  },
+  "resourceTypeList": {
+    "value": [
+      "Microsoft.App/managedEnvironments",
+      "Microsoft.KeyVault/vaults",
+      "Microsoft.Storage/storageAccounts",
+      "Microsoft.Sql/servers/databases",
+      "Microsoft.ContainerService/managedClusters",
+      "Microsoft.Cache/Redis",
+      "Microsoft.EventHub/namespaces",
+      "Microsoft.ServiceBus/namespaces",
+      "Microsoft.Network/applicationGateways",
+      "Microsoft.Network/loadBalancers",
+      "Microsoft.Network/publicIPAddresses",
+      "Microsoft.Compute/virtualMachines",
+      "Microsoft.Compute/virtualMachineScaleSets",
+      "Microsoft.Web/sites",
+      "Microsoft.DocumentDB/databaseAccounts",
+      "Microsoft.DBforPostgreSQL/flexibleServers",
+      "Microsoft.DBforMySQL/flexibleServers",
+      "Microsoft.ApiManagement/service",
+      "Microsoft.CognitiveServices/accounts",
+      "Microsoft.SignalRService/SignalR"
+    ]
+  }
+}
