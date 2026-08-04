@@ -75,12 +75,27 @@
           "displayName": "Resource types to target",
           "description": "Resource types evaluated for the combined logs+metrics diagnostic setting. Must be metric-emitting types - AllMetrics fails on types without metrics."
         }
+      },
+      "resourceLocations": {
+        "type": "Array",
+        "metadata": {
+          "displayName": "Resource locations this assignment serves",
+          "description": "Regions whose resources route to THIS assignment's Event Hubs. An Event Hub destination must be in the same region as the monitored resource, so each assignment carries exactly its own region — plus 'global' on the single primary assignment, to cover non-regional resources once."
+        }
       }
     },
     "policyRule": {
       "if": {
-        "field": "type",
-        "in": "[parameters('resourceTypeList')]"
+        "allOf": [
+          {
+            "field": "type",
+            "in": "[parameters('resourceTypeList')]"
+          },
+          {
+            "field": "location",
+            "in": "[parameters('resourceLocations')]"
+          }
+        ]
       },
       "then": {
         "effect": "[parameters('effect')]",

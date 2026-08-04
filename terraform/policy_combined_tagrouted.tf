@@ -126,12 +126,32 @@ resource "azurerm_policy_definition" "logs_metrics_to_eventhub_tagrouted" {
         description = "Resource types evaluated for the combined logs+metrics diagnostic setting. Must be metric-emitting types — AllMetrics fails on types without metrics."
       }
     }
+    resourceLocations = {
+      type = "Array"
+      metadata = {
+        displayName = "Resource locations this assignment serves"
+        description = "Regions whose resources route to THIS assignment's Event Hubs. An Event Hub destination must be in the same region as the monitored resource, so each assignment carries exactly its own region — plus 'global' on the single primary assignment, to cover non-regional resources once."
+      }
+    }
   })
 
   policy_rule = jsonencode({
     if = {
-      field = "type"
-      in    = "[parameters('resourceTypeList')]"
+      allOf = [
+        {
+          field = "type"
+          in    = "[parameters('resourceTypeList')]"
+        },
+        # Region guard. resourceSelectors on the assignment does the same job,
+        # but that is an assignment property anyone with write access can drop;
+        # this one travels with the definition and cannot be removed by editing
+        # an assignment. Without it, three regional assignments each match every
+        # resource in the estate and fight over the same diagnostic setting.
+        {
+          field = "location"
+          in    = "[parameters('resourceLocations')]"
+        },
+      ]
     }
     then = {
       effect = "[parameters('effect')]"
@@ -208,33 +228,45 @@ resource "azurerm_policy_definition" "logs_metrics_to_eventhub_tagrouted" {
 
 # NB: management group policy assignment names are capped at 24 characters.
 resource "azurerm_management_group_policy_assignment" "logs_metrics_to_eventhub_tagrouted" {
-  count = local.diag_tagrouted_enabled ? 1 : 0
+  for_each = local.diag_tagrouted_enabled ? local.diag_regions : {}
 
-  name                 = "diag-logsmet-evh-tag"
-  display_name         = "Deploy allLogs + AllMetrics to Event Hub (tag-routed)"
-  description          = "Streams allLogs and AllMetrics into a single diagnostic setting per resource. Hub selected by the subscription's '${var.diagnostics_environment_tag_name}' tag: ${join("/", var.diagnostics_prod_tag_values)} → prod hub, everything else (incl. untagged) → non-prod hub. Applies to new/updated resources in ${local.diag_resource_location}."
+  name                 = local.diag_tagrouted_assignment_names[each.key]
+  display_name         = "Deploy allLogs + AllMetrics to Event Hub (tag-routed, ${each.key})"
+  description          = "Streams allLogs and AllMetrics into a single diagnostic setting per resource in ${each.key}${each.value.primary ? " (+ non-regional resources)" : ""}. Hub selected by the subscription's '${var.diagnostics_environment_tag_name}' tag: ${join("/", var.diagnostics_prod_tag_values)} → prod hub, everything else (incl. untagged) → non-prod hub."
   management_group_id  = var.diagnostics_policy_management_group_id
   policy_definition_id = azurerm_policy_definition.logs_metrics_to_eventhub_tagrouted[0].id
-  location             = local.diag_resource_location
+  location             = each.key
 
   identity {
     type = "SystemAssigned"
   }
 
+  # Second layer of the region guard (the first is the `location` condition in
+  # the definition's policy rule). Filtering here means out-of-region resources
+  # are never evaluated, so the compliance dashboard shows real problems only.
+  resource_selectors {
+    name = "region"
+    selectors {
+      kind = "resourceLocation"
+      in   = each.value.locations
+    }
+  }
+
   parameters = jsonencode({
     environmentTagName                 = { value = var.diagnostics_environment_tag_name }
     prodTagValues                      = { value = var.diagnostics_prod_tag_values }
-    prodEventHubAuthorizationRuleId    = { value = var.diagnostics_prod_eventhub_auth_rule_id }
-    prodEventHubName                   = { value = coalesce(var.diagnostics_prod_eventhub_name, local.diag_eh_name) }
-    nonprodEventHubAuthorizationRuleId = { value = local.diag_eh_auth_rule_id }
-    nonprodEventHubName                = { value = local.diag_eh_name }
+    prodEventHubAuthorizationRuleId    = { value = each.value.prod_auth_rule_id }
+    prodEventHubName                   = { value = each.value.prod_event_hub_name }
+    nonprodEventHubAuthorizationRuleId = { value = each.value.nonprod_auth_rule_id }
+    nonprodEventHubName                = { value = each.value.nonprod_event_hub_name }
     resourceTypeList                   = { value = var.diagnostics_metrics_resource_types }
+    resourceLocations                  = { value = each.value.locations }
   })
 
   lifecycle {
     precondition {
-      condition     = var.diagnostics_prod_eventhub_auth_rule_id != null
-      error_message = "diagnostics_eventhub_tag_routing requires diagnostics_prod_eventhub_auth_rule_id (namespace-level Send rule on the prod Event Hub namespace)."
+      condition     = each.value.prod_auth_rule_id != null
+      error_message = "diagnostics_eventhub_tag_routing requires a prod Event Hub Send rule for every region: set prod_auth_rule_id on each diagnostics_regions entry (or diagnostics_prod_eventhub_auth_rule_id in single-region mode)."
     }
   }
 }
@@ -243,24 +275,24 @@ resource "azurerm_management_group_policy_assignment" "logs_metrics_to_eventhub_
 # Contributor (write diagnostic settings) + Azure Event Hubs Data Owner
 # (data-plane write to the hub). Granted at MG scope.
 resource "azurerm_role_assignment" "tagrouted_policy" {
-  for_each = local.diag_tagrouted_enabled ? toset([
-    "Log Analytics Contributor",
-    "Azure Event Hubs Data Owner",
-  ]) : toset([])
+  for_each = local.diag_tagrouted_enabled ? local.diag_region_role_pairs : {}
 
   scope                = var.diagnostics_policy_management_group_id
-  role_definition_name = each.value
-  principal_id         = azurerm_management_group_policy_assignment.logs_metrics_to_eventhub_tagrouted[0].identity[0].principal_id
+  role_definition_name = each.value.role
+  principal_id         = azurerm_management_group_policy_assignment.logs_metrics_to_eventhub_tagrouted[each.value.region].identity[0].principal_id
 }
 
-# The single identity must also write to the PROD namespace, which may live
-# outside the assigned management group. Grant Data Owner directly on that
-# namespace (derived from the auth rule ID). Harmless overlap if the namespace
-# is inside the MG anyway.
+# Each region's identity must also write to that region's PROD namespace, which
+# may live outside the assigned management group. Grant Data Owner directly on
+# the namespace (derived from the auth rule ID). Harmless overlap if the
+# namespace is inside the MG anyway.
 resource "azurerm_role_assignment" "tagrouted_policy_prod_hub" {
-  count = local.diag_tagrouted_enabled ? 1 : 0
+  for_each = local.diag_tagrouted_enabled ? {
+    for region, cfg in local.diag_regions : region => cfg
+    if cfg.prod_auth_rule_id != null
+  } : {}
 
-  scope                = regex("^(.+)/authorizationRules/[^/]+$", var.diagnostics_prod_eventhub_auth_rule_id)[0]
+  scope                = regex("^(.+)/authorizationRules/[^/]+$", each.value.prod_auth_rule_id)[0]
   role_definition_name = "Azure Event Hubs Data Owner"
-  principal_id         = azurerm_management_group_policy_assignment.logs_metrics_to_eventhub_tagrouted[0].identity[0].principal_id
+  principal_id         = azurerm_management_group_policy_assignment.logs_metrics_to_eventhub_tagrouted[each.key].identity[0].principal_id
 }

@@ -70,9 +70,9 @@ resource "azurerm_container_app" "cribl" {
     max_replicas = 1
 
     container {
-      name  = "cribl"
-      image = var.cribl_image
-      cpu   = 1.0
+      name   = "cribl"
+      image  = var.cribl_image
+      cpu    = 1.0
       memory = "2Gi"
 
       env {

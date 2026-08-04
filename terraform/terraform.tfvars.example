@@ -35,3 +35,28 @@ container_image = "docker.io/myorg/myapp:latest"
 # Required outbound ports from the Cribl worker node to servicebus.windows.net:
 #   443       — AMQP over WebSockets (preferred if 5671/5672 are blocked by firewall)
 #   5671/5672 — native AMQP
+
+# ── Multi-region diagnostics policy ──────────────────────────────────────────
+# An Event Hub destination must be in the SAME region as the monitored resource,
+# so one assignment is created per entry, each filtered to its own region.
+# Exactly one entry sets primary = true; that region also covers non-regional
+# ("global") resources. Leave diagnostics_regions unset for single-region mode.
+#
+# diagnostics_regions = {
+#   switzerlandnorth = {
+#     short                = "chn"
+#     primary              = true    # also carries "global" resources
+#     nonprod_auth_rule_id = "/subscriptions/.../namespaces/evhns-diag-np-chn-001/authorizationRules/DiagnosticsRule"
+#     prod_auth_rule_id    = "/subscriptions/.../namespaces/evhns-diag-prd-chn-001/authorizationRules/DiagnosticsRule"
+#   }
+#   switzerlandwest = {
+#     short                = "chw"
+#     nonprod_auth_rule_id = "/subscriptions/.../namespaces/evhns-diag-np-chw-001/authorizationRules/DiagnosticsRule"
+#     prod_auth_rule_id    = "/subscriptions/.../namespaces/evhns-diag-prd-chw-001/authorizationRules/DiagnosticsRule"
+#   }
+#   swedencentral = {
+#     short                = "sec"
+#     nonprod_auth_rule_id = "/subscriptions/.../namespaces/evhns-diag-np-sec-001/authorizationRules/DiagnosticsRule"
+#     prod_auth_rule_id    = "/subscriptions/.../namespaces/evhns-diag-prd-sec-001/authorizationRules/DiagnosticsRule"
+#   }
+# }

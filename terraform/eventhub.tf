@@ -1,10 +1,10 @@
 # ── Event Hub Namespace ───────────────────────────────────────────────────────
 resource "azurerm_eventhub_namespace" "main" {
-  name                     = "evhns-event-hub-demo"
-  resource_group_name      = azurerm_resource_group.main.name
-  location                 = azurerm_resource_group.main.location
-  sku                      = "Standard"
-  capacity                 = var.event_hub_capacity
+  name                          = "evhns-event-hub-demo"
+  resource_group_name           = azurerm_resource_group.main.name
+  location                      = azurerm_resource_group.main.location
+  sku                           = "Standard"
+  capacity                      = var.event_hub_capacity
   auto_inflate_enabled          = true
   maximum_throughput_units      = 20
   public_network_access_enabled = false
@@ -25,9 +25,9 @@ resource "azurerm_eventhub_namespace" "main" {
 
 # ── Event Hub Instance ────────────────────────────────────────────────────────
 resource "azurerm_eventhub" "main" {
-  name         = "evh-container-app-logs"
-  namespace_id = azurerm_eventhub_namespace.main.id
-  partition_count  = 4
+  name              = "evh-container-app-logs"
+  namespace_id      = azurerm_eventhub_namespace.main.id
+  partition_count   = 4
   message_retention = 7
 }
 

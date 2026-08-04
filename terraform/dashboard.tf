@@ -28,7 +28,7 @@ resource "azurerm_application_insights_workbook" "main" {
               isRequired = true
               typeSettings = {
                 additionalSubscriptionIds = []
-                includeAll               = false
+                includeAll                = false
               }
             },
             {

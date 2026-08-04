@@ -37,6 +37,64 @@ locals {
     var.diagnostics_policy_resource_location,
     var.location,
   )
+
+  # ── Per-region fan-out ─────────────────────────────────────────────────────
+  # An Event Hub destination must be in the same region as the monitored
+  # resource, so there is one assignment per region, each filtered to its own
+  # region. Without that filter every assignment matches every resource and the
+  # out-of-region ones fail permanently (or fight over the same setting name).
+  diag_regions_explicit = length(var.diagnostics_regions) > 0
+
+  diag_regions_from_var = {
+    for region, cfg in var.diagnostics_regions : region => {
+      short                  = cfg.short
+      primary                = cfg.primary
+      nonprod_auth_rule_id   = cfg.nonprod_auth_rule_id
+      nonprod_event_hub_name = coalesce(cfg.nonprod_event_hub_name, local.diag_eh_name)
+      prod_auth_rule_id      = cfg.prod_auth_rule_id
+      prod_event_hub_name    = coalesce(cfg.prod_event_hub_name, cfg.nonprod_event_hub_name, local.diag_eh_name)
+      # The primary region also carries non-regional resources. `global` resources
+      # have no same-region constraint, but a strict per-region filter would
+      # otherwise exclude them from every assignment and leave them uncovered.
+      locations = cfg.primary ? [region, "global"] : [region]
+    }
+  }
+
+  # Legacy single-region shape, synthesised from the flat variables so existing
+  # tfvars keep working unchanged (and keep their original assignment names).
+  diag_regions_legacy = {
+    (local.diag_resource_location) = {
+      short                  = "pri"
+      primary                = true
+      nonprod_auth_rule_id   = local.diag_eh_auth_rule_id
+      nonprod_event_hub_name = local.diag_eh_name
+      prod_auth_rule_id      = var.diagnostics_prod_eventhub_auth_rule_id
+      prod_event_hub_name    = coalesce(var.diagnostics_prod_eventhub_name, local.diag_eh_name)
+      locations              = [local.diag_resource_location, "global"]
+    }
+  }
+
+  diag_regions = local.diag_regions_explicit ? local.diag_regions_from_var : local.diag_regions_legacy
+
+  # Assignment names change shape only in multi-region mode, so a single-region
+  # estate is not forced into a replace by this refactor.
+  diag_logs_assignment_names = {
+    for region, cfg in local.diag_regions : region =>
+    local.diag_regions_explicit ? "diag-logs-evh-${cfg.short}" : "diag-alllogs-to-evh"
+  }
+  diag_tagrouted_assignment_names = {
+    for region, cfg in local.diag_regions : region =>
+    local.diag_regions_explicit ? "diag-logsmet-evh-${cfg.short}" : "diag-logsmet-evh-tag"
+  }
+
+  # region|role pairs — each per-region assignment gets its own system-assigned
+  # identity, so the role grants fan out with it.
+  diag_policy_roles = ["Log Analytics Contributor", "Azure Event Hubs Data Owner"]
+
+  diag_region_role_pairs = {
+    for pair in setproduct(keys(local.diag_regions), local.diag_policy_roles) :
+    "${pair[0]}|${pair[1]}" => { region = pair[0], role = pair[1] }
+  }
 }
 
 # Built-in initiative (policy set). Referenced by display name so we don't pin a
@@ -46,26 +104,40 @@ data "azurerm_policy_set_definition" "diag_to_eventhub" {
 }
 
 resource "azurerm_management_group_policy_assignment" "diag_to_eventhub" {
-  count = local.diag_policy_enabled ? 1 : 0
+  for_each = local.diag_policy_enabled ? local.diag_regions : {}
 
-  name                 = "diag-alllogs-to-evh"
-  display_name         = "Enable allLogs resource logging to Event Hub"
-  description          = "DeployIfNotExists: streams the allLogs category group from supported resources to the central Event Hub for Cribl. Applies to new/updated resources in ${local.diag_resource_location}."
+  name                 = local.diag_logs_assignment_names[each.key]
+  display_name         = "Enable allLogs resource logging to Event Hub (${each.key})"
+  description          = "DeployIfNotExists: streams the allLogs category group from supported resources to the ${each.key} Event Hub for Cribl. Applies to new/updated resources in ${each.key}."
   management_group_id  = var.diagnostics_policy_management_group_id
   policy_definition_id = data.azurerm_policy_set_definition.diag_to_eventhub.id
 
   # Required because the DeployIfNotExists effect needs a managed identity to
   # create the diagnostic settings. location pins where that identity lives.
-  location = local.diag_resource_location
+  location = each.key
 
   identity {
     type = "SystemAssigned"
   }
 
+  # Belt to the resourceLocation parameter's braces: keeps this assignment from
+  # being evaluated at all outside its region, so compliance reporting stays
+  # clean instead of red-but-expected. Note the built-in filters internally on
+  # the resourceLocation parameter, which is a single region and cannot include
+  # "global" — non-regional resources are therefore not covered by this
+  # initiative in any region. The custom tag-routed policy does cover them.
+  resource_selectors {
+    name = "region"
+    selectors {
+      kind = "resourceLocation"
+      in   = [each.key]
+    }
+  }
+
   parameters = jsonencode({
-    eventHubAuthorizationRuleId = { value = local.diag_eh_auth_rule_id }
-    eventHubName                = { value = local.diag_eh_name }
-    resourceLocation            = { value = local.diag_resource_location }
+    eventHubAuthorizationRuleId = { value = each.value.nonprod_auth_rule_id }
+    eventHubName                = { value = each.value.nonprod_event_hub_name }
+    resourceLocation            = { value = each.key }
   })
 }
 
@@ -77,14 +149,11 @@ resource "azurerm_management_group_policy_assignment" "diag_to_eventhub" {
 # — it lacks the Event Hubs data-plane right. Granted at the MG scope so it
 # covers every resource the initiative may target.
 resource "azurerm_role_assignment" "diag_policy" {
-  for_each = local.diag_policy_enabled ? toset([
-    "Log Analytics Contributor",
-    "Azure Event Hubs Data Owner",
-  ]) : toset([])
+  for_each = local.diag_policy_enabled ? local.diag_region_role_pairs : {}
 
   scope                = var.diagnostics_policy_management_group_id
-  role_definition_name = each.value
-  principal_id         = azurerm_management_group_policy_assignment.diag_to_eventhub[0].identity[0].principal_id
+  role_definition_name = each.value.role
+  principal_id         = azurerm_management_group_policy_assignment.diag_to_eventhub[each.value.region].identity[0].principal_id
 }
 
 # ── Applying to existing resources (optional, manual) ────────────────────────

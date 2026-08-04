@@ -86,6 +86,52 @@ variable "diagnostics_policy_resource_location" {
   default     = null
 }
 
+variable "diagnostics_regions" {
+  description = <<-EOT
+    Per-region Event Hub targets for the diagnostics policies. An Event Hub destination must
+    sit in the SAME region as the monitored resource, so one policy assignment is created per
+    entry, each filtered to its own region via resourceSelectors. Map key = Azure region name
+    (e.g. "switzerlandnorth"). Leave empty to keep the legacy single-region behaviour driven by
+    diagnostics_policy_resource_location.
+
+    Exactly one entry must set primary = true. That region additionally covers non-regional
+    ("global") resources, which have no same-region constraint — marking more than one primary
+    would deploy competing settings to the same global resource.
+  EOT
+
+  type = map(object({
+    # Suffix for the policy assignment name. MG assignment names cap at 24 chars.
+    short                  = string
+    primary                = optional(bool, false)
+    nonprod_auth_rule_id   = string
+    nonprod_event_hub_name = optional(string)
+    # Required only when diagnostics_eventhub_tag_routing = true.
+    prod_auth_rule_id   = optional(string)
+    prod_event_hub_name = optional(string)
+  }))
+  default = {}
+
+  validation {
+    condition     = length(var.diagnostics_regions) == 0 || length([for c in var.diagnostics_regions : c if c.primary]) == 1
+    error_message = "Exactly one entry in diagnostics_regions must set primary = true; it carries the 'global' (non-regional) resources."
+  }
+
+  validation {
+    condition     = alltrue([for c in var.diagnostics_regions : length(c.short) > 0 && length(c.short) <= 6])
+    error_message = "diagnostics_regions[*].short must be 1-6 characters — management group policy assignment names are capped at 24."
+  }
+
+  validation {
+    condition     = length(distinct([for c in var.diagnostics_regions : c.short])) == length(var.diagnostics_regions)
+    error_message = "diagnostics_regions[*].short must be unique; it is what makes each per-region assignment name distinct."
+  }
+
+  validation {
+    condition     = alltrue([for r in keys(var.diagnostics_regions) : r == lower(r) && !can(regex("\\s", r))])
+    error_message = "diagnostics_regions keys must be lowercase Azure region names with no spaces, e.g. 'switzerlandnorth'."
+  }
+}
+
 variable "diagnostics_combined_policy_enabled" {
   description = "Opt in to the SINGLE-SETTING alternative (policy_combined.tf): one custom DeployIfNotExists policy that writes allLogs + AllMetrics into ONE diagnostic setting per resource, instead of the two separate settings produced by the built-in logs initiative + the metrics policy. When true, do NOT also assign those two to the same scope or resources get duplicate settings. Targets var.diagnostics_metrics_resource_types. Requires diagnostics_policy_management_group_id to be set."
   type        = bool
