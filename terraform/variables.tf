@@ -60,6 +60,31 @@ variable "event_hub_capacity" {
   }
 }
 
+# ── Premium-tier Event Hub alerts (alerts_eventhub_premium.tf) ────────────────
+
+variable "eventhub_premium_alerts_enabled" {
+  description = "Deploy the Premium/Dedicated-tier Event Hub alerts in alerts_eventhub_premium.tf. These rules watch NamespaceCpuUsage and NamespaceMemoryUsage, which only emit on Premium and Dedicated namespaces — on a Standard namespace they are silent, so the alerts would never fire. Leave false while the namespace is Standard."
+  type        = bool
+  default     = false
+}
+
+variable "eventhub_premium_namespace_id" {
+  description = "Resource ID of the Premium (or Dedicated) Event Hub namespace to watch. Defaults to this project's namespace when null, which is only correct if that namespace has been recreated at Premium tier — Azure does NOT support migrating a Standard namespace to Premium, so in practice a Premium namespace is a separate resource and this should be set explicitly."
+  type        = string
+  default     = null
+}
+
+variable "eventhub_premium_processing_units" {
+  description = "Processing units (PUs) assigned to the Premium namespace. Premium bills and scales in PUs rather than throughput units, and the brokered-connection quota is 10,000 per PU — this value is what turns that per-PU quota into an absolute alert threshold. Ignored unless eventhub_premium_alerts_enabled is true."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = contains([1, 2, 4, 6, 8, 10, 12, 16], var.eventhub_premium_processing_units)
+    error_message = "eventhub_premium_processing_units must be one of the purchasable PU counts: 1, 2, 4, 6, 8, 10, 12, 16. Note that 3, 5, 7 and anything above 16 are not offered."
+  }
+}
+
 # ── Diagnostic-settings-at-scale policy (policy_diagnostics.tf) ────────────────
 
 variable "diagnostics_policy_management_group_id" {
