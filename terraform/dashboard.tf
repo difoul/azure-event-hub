@@ -266,6 +266,155 @@ resource "azurerm_application_insights_workbook" "main" {
           title = "Incoming Bytes — Total"
         }
         name = "eh-bytes"
+      },
+
+      {
+        type        = 10
+        customWidth = "50"
+        content = {
+          version                  = "MetricsItem/2.0"
+          size                     = 0
+          chartType                = 2
+          resourceType             = "microsoft.eventhub/namespaces"
+          metricScope              = 0
+          resourceIds              = ["{EventHubNamespace}"]
+          timeContextFromParameter = "TimeRange"
+          metrics = [{
+            namespace   = "microsoft.eventhub/namespaces"
+            metric      = "microsoft.eventhub/namespaces--OutgoingBytes"
+            aggregation = 1
+            splitBy     = null
+          }]
+          title = "Outgoing Bytes — Total (Cribl egress volume)"
+        }
+        name = "eh-outgoing-bytes"
+      },
+
+      # ── Section: Event Hub Errors & Capacity ─────────────────────────────────
+      {
+        type    = 1
+        content = { json = "## Event Hub — Errors & Capacity\n\nPair these with the metric alerts in `alerts.tf`. `Server Errors` and `Quota Exceeded Errors` carry a count but no reason — to find the cause, query `AZMSOperationalLogs` in Log Analytics, which requires deploying with `enable_law = true`." }
+        name    = "eh-errors-header"
+      },
+
+      # All three error metrics share one chart so their shapes can be compared
+      # directly: quota errors rising with throughput points at TU exhaustion,
+      # whereas user errors moving alone points at the client (Cribl).
+      {
+        type        = 10
+        customWidth = "50"
+        content = {
+          version                  = "MetricsItem/2.0"
+          size                     = 0
+          chartType                = 2
+          resourceType             = "microsoft.eventhub/namespaces"
+          metricScope              = 0
+          resourceIds              = ["{EventHubNamespace}"]
+          timeContextFromParameter = "TimeRange"
+          metrics = [
+            {
+              namespace   = "microsoft.eventhub/namespaces"
+              metric      = "microsoft.eventhub/namespaces--ServerErrors"
+              aggregation = 1
+              splitBy     = null
+            },
+            {
+              namespace   = "microsoft.eventhub/namespaces"
+              metric      = "microsoft.eventhub/namespaces--UserErrors"
+              aggregation = 1
+              splitBy     = null
+            },
+            {
+              namespace   = "microsoft.eventhub/namespaces"
+              metric      = "microsoft.eventhub/namespaces--QuotaExceededErrors"
+              aggregation = 1
+              splitBy     = null
+            }
+          ]
+          title = "Errors — Server vs User vs Quota Exceeded"
+        }
+        name = "eh-errors"
+      },
+
+      # Successful alongside throttled gives throttling as a proportion of load,
+      # which a bare throttled count cannot show — 10 throttles against 10
+      # requests is an outage, against 100,000 it is noise.
+      {
+        type        = 10
+        customWidth = "50"
+        content = {
+          version                  = "MetricsItem/2.0"
+          size                     = 0
+          chartType                = 2
+          resourceType             = "microsoft.eventhub/namespaces"
+          metricScope              = 0
+          resourceIds              = ["{EventHubNamespace}"]
+          timeContextFromParameter = "TimeRange"
+          metrics = [
+            {
+              namespace   = "microsoft.eventhub/namespaces"
+              metric      = "microsoft.eventhub/namespaces--SuccessfulRequests"
+              aggregation = 1
+              splitBy     = null
+            },
+            {
+              namespace   = "microsoft.eventhub/namespaces"
+              metric      = "microsoft.eventhub/namespaces--ThrottledRequests"
+              aggregation = 1
+              splitBy     = null
+            }
+          ]
+          title = "Requests — Successful vs Throttled"
+        }
+        name = "eh-requests"
+      },
+
+      # Point-in-time gauge against the Standard-tier ceiling of 5,000.
+      {
+        type        = 10
+        customWidth = "50"
+        content = {
+          version                  = "MetricsItem/2.0"
+          size                     = 0
+          chartType                = 2
+          resourceType             = "microsoft.eventhub/namespaces"
+          metricScope              = 0
+          resourceIds              = ["{EventHubNamespace}"]
+          timeContextFromParameter = "TimeRange"
+          metrics = [{
+            namespace   = "microsoft.eventhub/namespaces"
+            metric      = "microsoft.eventhub/namespaces--ActiveConnections"
+            aggregation = 3
+            splitBy     = null
+          }]
+          title = "Active Connections — Maximum (Standard tier caps at 5,000)"
+        }
+        name = "eh-connections"
+      },
+
+      # Auto-inflate visibility. Sudden step changes in ingress are what drive
+      # TU scaling decisions; the AutoScaleLogs / AZMSAutoscaleLogs category
+      # records the resulting decisions when enable_law = true.
+      {
+        type        = 10
+        customWidth = "50"
+        content = {
+          version                  = "MetricsItem/2.0"
+          size                     = 0
+          chartType                = 2
+          resourceType             = "microsoft.eventhub/namespaces"
+          metricScope              = 0
+          resourceIds              = ["{EventHubNamespace}"]
+          timeContextFromParameter = "TimeRange"
+          metrics = [{
+            namespace   = "microsoft.eventhub/namespaces"
+            metric      = "microsoft.eventhub/namespaces--IncomingRequests"
+            aggregation = 1
+            splitBy     = null
+          }]
+          title = "Incoming Requests — Total (batches, not events)"
+        }
+        name = "eh-incoming-requests"
       }
 
     ]
