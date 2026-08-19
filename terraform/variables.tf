@@ -60,6 +60,47 @@ variable "event_hub_capacity" {
   }
 }
 
+variable "eventhub_diagnostic_log_categories" {
+  description = <<-EOT
+    Resource log categories enabled on the Event Hub namespace's own diagnostic setting.
+
+    These must be listed INDIVIDUALLY. Microsoft.EventHub/Namespaces has not onboarded to
+    Azure Monitor category groups, so category_group = "allLogs" (which works for, say,
+    Microsoft.App/managedEnvironments) is rejected by ARM with a BadRequest.
+
+    An unsupported category name fails the same way, so confirm the exact set for your
+    namespace before changing this:
+
+      az monitor diagnostic-settings categories list --resource <namespace-resource-id> \
+        --query "value[?categoryType=='Logs'].name" -o tsv
+
+    The default covers the categories available on every tier. Two more exist but emit only
+    on Premium and Dedicated namespaces — add "RuntimeAuditLogs" and "ApplicationMetricsLogs"
+    there for data-plane audit trails and consumer lag. Depending on namespace configuration
+    the API may also offer CustomerManagedKeyUserLogs, EventHubVNetConnectionEvent,
+    DataDRLogs and DiagnosticErrorLogs; verify with the command above before adding them.
+  EOT
+
+  type = list(string)
+  default = [
+    "OperationalLogs",
+    "ArchiveLogs",
+    "AutoScaleLogs",
+    "KafkaCoordinatorLogs",
+    "KafkaUserErrorLogs",
+  ]
+
+  validation {
+    condition     = length(var.eventhub_diagnostic_log_categories) > 0
+    error_message = "At least one log category must be listed. An azurerm_monitor_diagnostic_setting with no enabled_log and no enabled_metric block is invalid."
+  }
+
+  validation {
+    condition     = !contains(var.eventhub_diagnostic_log_categories, "allLogs")
+    error_message = "\"allLogs\" is a category GROUP, not a category, and Microsoft.EventHub/Namespaces does not support category groups. List the individual categories instead."
+  }
+}
+
 # ── Premium-tier Event Hub alerts (alerts_eventhub_premium.tf) ────────────────
 
 variable "eventhub_premium_alerts_enabled" {

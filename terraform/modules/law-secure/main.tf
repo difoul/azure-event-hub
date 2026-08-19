@@ -164,6 +164,12 @@ resource "azurerm_monitor_diagnostic_setting" "audit" {
   target_resource_id         = azurerm_log_analytics_workspace.this.id
   log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
 
+  # Route to resource-specific tables (LAQueryLogs, LASummaryLogs) rather than
+  # the shared AzureDiagnostics table, matching the Event Hub namespace setting
+  # in monitoring.tf. Typed columns instead of the generic property bag, so
+  # queries are simpler and cheaper.
+  log_analytics_destination_type = "Dedicated"
+
   enabled_log {
     category = "Audit"
   }

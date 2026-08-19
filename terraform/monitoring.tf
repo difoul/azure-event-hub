@@ -70,15 +70,19 @@ module "law" {
 # Consequence: this only deploys when var.enable_law = true. Without a workspace
 # there is no independent sink to send to, and the loop is the only alternative.
 #
-# category_group = "allLogs" rather than a hand-listed set of categories: it
-# tracks new categories as Azure adds them, and it degrades cleanly across SKUs.
-# On this Standard namespace the categories that actually emit are
-# OperationalLogs (management-plane operations), AutoScaleLogs (auto-inflate
-# decisions — relevant here since auto_inflate_enabled = true), ArchiveLogs,
-# KafkaCoordinatorLogs, KafkaUserErrorLogs, EventHubVNetConnectionEvent and
-# CustomerManagedKeyUserLogs. RuntimeAuditLogs and ApplicationMetricsLogs — the
-# data-plane categories that would give per-client send/receive audit trails and
-# consumer lag — are PREMIUM/DEDICATED ONLY and stay silent on Standard.
+# Categories are listed individually rather than via category_group = "allLogs".
+# Microsoft.EventHub/Namespaces has NOT onboarded to Azure Monitor category
+# groups, so ARM rejects "allLogs" with a BadRequest. This differs from the
+# Container App Environment setting above, where Microsoft.App/managedEnvironments
+# does support groups — the two are not interchangeable, and the working pattern
+# there is not a safe template here.
+#
+# The categories that matter on this namespace are OperationalLogs
+# (management-plane operations) and AutoScaleLogs (auto-inflate decisions,
+# relevant since auto_inflate_enabled = true). RuntimeAuditLogs and
+# ApplicationMetricsLogs — the data-plane categories giving per-client
+# send/receive audit trails and consumer lag — are PREMIUM/DEDICATED ONLY and so
+# are not in the default list. See var.eventhub_diagnostic_log_categories.
 resource "azurerm_monitor_diagnostic_setting" "eventhub_namespace" {
   count = var.enable_law ? 1 : 0
 
@@ -92,8 +96,12 @@ resource "azurerm_monitor_diagnostic_setting" "eventhub_namespace" {
   # which makes the KQL far simpler and cheaper to query.
   log_analytics_destination_type = "Dedicated"
 
-  enabled_log {
-    category_group = "allLogs"
+  dynamic "enabled_log" {
+    for_each = toset(var.eventhub_diagnostic_log_categories)
+
+    content {
+      category = enabled_log.value
+    }
   }
 
   # Platform metrics are already queryable from the metrics store for 93 days
